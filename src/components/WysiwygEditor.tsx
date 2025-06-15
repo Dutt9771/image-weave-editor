@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, Image, Code, Eye, Type, Palette, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -34,7 +33,6 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
     
     try {
       document.execCommand(command, false, value);
-      // Small delay to ensure DOM is updated before reading
       setTimeout(() => {
         if (editorRef.current && !isUpdatingRef.current) {
           const newContent = editorRef.current.innerHTML;
@@ -62,29 +60,78 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file && file.type.startsWith('image/')) {
+      console.log('Image selected:', file.name, file.size);
       setSelectedImage(file);
       setShowImageCropper(true);
+    } else {
+      console.error('Invalid file type selected');
+    }
+    // Reset the input value to allow selecting the same file again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
   const handleCroppedImage = (croppedImageUrl: string) => {
+    console.log('Cropped image URL received:', croppedImageUrl);
+    
+    const imgHtml = `<img src="${croppedImageUrl}" style="max-width: 100%; height: auto; margin: 10px 0; border-radius: 4px;" alt="Uploaded image" />`;
+    
     if (isHtmlMode) {
-      // In HTML mode, insert at cursor position or end
-      const imgHtml = `<img src="${croppedImageUrl}" style="max-width: 100%; height: auto; cursor: move;" draggable="true" />`;
+      // In HTML mode, append to content
       const newContent = content + imgHtml;
       setContent(newContent);
       onChange?.(newContent);
     } else {
-      // In visual mode, use execCommand
-      const imgHtml = `<img src="${croppedImageUrl}" style="max-width: 100%; height: auto; cursor: move;" draggable="true" />`;
-      
+      // In visual mode, insert at cursor position
       if (editorRef.current) {
+        isUpdatingRef.current = true;
         editorRef.current.focus();
+        
         try {
-          document.execCommand('insertHTML', false, imgHtml);
-          setTimeout(() => handleContentChange(), 0);
+          // Try to insert at cursor position
+          const selection = window.getSelection();
+          if (selection && selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0);
+            range.deleteContents();
+            const imgElement = document.createElement('div');
+            imgElement.innerHTML = imgHtml;
+            const imgNode = imgElement.firstChild;
+            if (imgNode) {
+              range.insertNode(imgNode);
+              range.setStartAfter(imgNode);
+              range.setEndAfter(imgNode);
+              selection.removeAllRanges();
+              selection.addRange(range);
+            } else {
+              // Fallback: append to end
+              editorRef.current.innerHTML += imgHtml;
+            }
+          } else {
+            // Fallback: append to end
+            editorRef.current.innerHTML += imgHtml;
+          }
+          
+          setTimeout(() => {
+            if (editorRef.current) {
+              const newContent = editorRef.current.innerHTML;
+              setContent(newContent);
+              onChange?.(newContent);
+            }
+            isUpdatingRef.current = false;
+          }, 100);
         } catch (error) {
           console.error('Failed to insert image:', error);
+          // Fallback method
+          editorRef.current.innerHTML += imgHtml;
+          setTimeout(() => {
+            if (editorRef.current) {
+              const newContent = editorRef.current.innerHTML;
+              setContent(newContent);
+              onChange?.(newContent);
+            }
+            isUpdatingRef.current = false;
+          }, 100);
         }
       }
     }
@@ -108,9 +155,7 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
     isUpdatingRef.current = true;
     
     if (isHtmlMode) {
-      // Switching from HTML to visual
       setIsHtmlMode(false);
-      // Use setTimeout to ensure state is updated before DOM manipulation
       setTimeout(() => {
         if (editorRef.current) {
           editorRef.current.innerHTML = content;
@@ -118,7 +163,6 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
         }
       }, 0);
     } else {
-      // Switching from visual to HTML
       if (editorRef.current) {
         const currentContent = editorRef.current.innerHTML;
         setContent(currentContent);
@@ -133,7 +177,6 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
   const fontFamilies = ['Arial', 'Georgia', 'Times New Roman', 'Helvetica', 'Verdana', 'Courier New'];
   const colors = ['#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#FFA500', '#800080', '#FFC0CB'];
 
-  // Sync external value changes only when not in editing mode
   useEffect(() => {
     if (value !== content && !isUpdatingRef.current) {
       setContent(value);
@@ -390,6 +433,7 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
           image={selectedImage}
           onCrop={handleCroppedImage}
           onCancel={() => {
+            console.log('Image cropper cancelled');
             setShowImageCropper(false);
             setSelectedImage(null);
           }}

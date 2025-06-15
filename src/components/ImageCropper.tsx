@@ -22,14 +22,20 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ image, onCrop, onCancel }) 
   const [completedCrop, setCompletedCrop] = useState<PixelCrop>();
   const [imgRef, setImgRef] = useState<HTMLImageElement>();
   const [imageUrl, setImageUrl] = useState<string>('');
+  const [isProcessing, setIsProcessing] = useState(false);
 
   React.useEffect(() => {
     const url = URL.createObjectURL(image);
+    console.log('Created image URL:', url);
     setImageUrl(url);
-    return () => URL.revokeObjectURL(url);
+    return () => {
+      URL.revokeObjectURL(url);
+      console.log('Revoked image URL:', url);
+    };
   }, [image]);
 
   const onImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
+    console.log('Image loaded in cropper');
     setImgRef(e.currentTarget);
   }, []);
 
@@ -48,6 +54,15 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ image, onCrop, onCancel }) 
       canvas.width = crop.width;
       canvas.height = crop.height;
 
+      console.log('Cropping image with dimensions:', {
+        originalWidth: image.naturalWidth,
+        originalHeight: image.naturalHeight,
+        cropWidth: crop.width,
+        cropHeight: crop.height,
+        scaleX,
+        scaleY
+      });
+
       ctx.drawImage(
         image,
         crop.x * scaleX,
@@ -60,12 +75,14 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ image, onCrop, onCancel }) 
         crop.height
       );
 
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
         canvas.toBlob((blob) => {
           if (!blob) {
-            throw new Error('Canvas is empty');
+            reject(new Error('Canvas is empty'));
+            return;
           }
           const url = URL.createObjectURL(blob);
+          console.log('Created cropped image URL:', url);
           resolve(url);
         }, 'image/jpeg', 0.9);
       });
@@ -74,46 +91,64 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ image, onCrop, onCancel }) 
   );
 
   const handleCrop = useCallback(async () => {
-    if (imgRef && completedCrop?.width && completedCrop?.height) {
-      try {
-        const croppedImageUrl = await getCroppedImg(imgRef, completedCrop);
-        onCrop(croppedImageUrl);
-      } catch (error) {
-        console.error('Error cropping image:', error);
-      }
+    if (!imgRef || !completedCrop?.width || !completedCrop?.height) {
+      console.error('Missing required data for cropping');
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      console.log('Starting crop process');
+      const croppedImageUrl = await getCroppedImg(imgRef, completedCrop);
+      console.log('Crop successful, calling onCrop');
+      onCrop(croppedImageUrl);
+    } catch (error) {
+      console.error('Error cropping image:', error);
+    } finally {
+      setIsProcessing(false);
     }
   }, [completedCrop, imgRef, getCroppedImg, onCrop]);
 
+  const handleCancel = () => {
+    console.log('Cropping cancelled');
+    onCancel();
+  };
+
   return (
-    <Dialog open={true} onOpenChange={onCancel}>
+    <Dialog open={true} onOpenChange={handleCancel}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-auto">
         <DialogHeader>
           <DialogTitle>Crop Image</DialogTitle>
         </DialogHeader>
         
         <div className="flex justify-center p-4">
-          <ReactCrop
-            crop={crop}
-            onChange={(c) => setCrop(c)}
-            onComplete={(c) => setCompletedCrop(c)}
-            aspect={undefined}
-            className="max-w-full"
-          >
-            <img
-              src={imageUrl}
-              onLoad={onImageLoad}
-              alt="Crop preview"
-              className="max-w-full max-h-96 object-contain"
-            />
-          </ReactCrop>
+          {imageUrl && (
+            <ReactCrop
+              crop={crop}
+              onChange={(c) => setCrop(c)}
+              onComplete={(c) => setCompletedCrop(c)}
+              aspect={undefined}
+              className="max-w-full"
+            >
+              <img
+                src={imageUrl}
+                onLoad={onImageLoad}
+                alt="Crop preview"
+                className="max-w-full max-h-96 object-contain"
+              />
+            </ReactCrop>
+          )}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onCancel}>
+          <Button variant="outline" onClick={handleCancel} disabled={isProcessing}>
             Cancel
           </Button>
-          <Button onClick={handleCrop} disabled={!completedCrop?.width || !completedCrop?.height}>
-            Crop & Insert
+          <Button 
+            onClick={handleCrop} 
+            disabled={!completedCrop?.width || !completedCrop?.height || isProcessing}
+          >
+            {isProcessing ? 'Processing...' : 'Crop & Insert'}
           </Button>
         </DialogFooter>
       </DialogContent>
