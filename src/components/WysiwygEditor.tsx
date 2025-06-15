@@ -27,23 +27,37 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isUpdatingRef = useRef(false);
 
   const handleCommand = useCallback((command: string, value?: string) => {
-    document.execCommand(command, false, value);
-    if (editorRef.current) {
-      const newContent = editorRef.current.innerHTML;
-      setContent(newContent);
-      onChange?.(newContent);
+    if (isHtmlMode) return;
+    
+    try {
+      document.execCommand(command, false, value);
+      // Small delay to ensure DOM is updated before reading
+      setTimeout(() => {
+        if (editorRef.current && !isUpdatingRef.current) {
+          const newContent = editorRef.current.innerHTML;
+          setContent(newContent);
+          onChange?.(newContent);
+        }
+      }, 0);
+    } catch (error) {
+      console.error('Command execution failed:', error);
     }
-  }, [onChange]);
+  }, [onChange, isHtmlMode]);
 
   const handleContentChange = useCallback(() => {
+    if (isHtmlMode || isUpdatingRef.current) return;
+    
     if (editorRef.current) {
       const newContent = editorRef.current.innerHTML;
-      setContent(newContent);
-      onChange?.(newContent);
+      if (newContent !== content) {
+        setContent(newContent);
+        onChange?.(newContent);
+      }
     }
-  }, [onChange]);
+  }, [onChange, content, isHtmlMode]);
 
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -54,14 +68,25 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
   };
 
   const handleCroppedImage = (croppedImageUrl: string) => {
-    // Use document.execCommand to insert the image properly
-    const imgHtml = `<img src="${croppedImageUrl}" style="max-width: 100%; height: auto; cursor: move;" draggable="true" />`;
-    
-    // Focus the editor and insert the image
-    if (editorRef.current) {
-      editorRef.current.focus();
-      document.execCommand('insertHTML', false, imgHtml);
-      handleContentChange();
+    if (isHtmlMode) {
+      // In HTML mode, insert at cursor position or end
+      const imgHtml = `<img src="${croppedImageUrl}" style="max-width: 100%; height: auto; cursor: move;" draggable="true" />`;
+      const newContent = content + imgHtml;
+      setContent(newContent);
+      onChange?.(newContent);
+    } else {
+      // In visual mode, use execCommand
+      const imgHtml = `<img src="${croppedImageUrl}" style="max-width: 100%; height: auto; cursor: move;" draggable="true" />`;
+      
+      if (editorRef.current) {
+        editorRef.current.focus();
+        try {
+          document.execCommand('insertHTML', false, imgHtml);
+          setTimeout(() => handleContentChange(), 0);
+        } catch (error) {
+          console.error('Failed to insert image:', error);
+        }
+      }
     }
     
     setShowImageCropper(false);
@@ -69,33 +94,58 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
   };
 
   const insertVariable = (variable: string) => {
-    handleCommand('insertText', `{{${variable}}}`);
+    const variableText = `{{${variable}}}`;
+    if (isHtmlMode) {
+      const newContent = content + variableText;
+      setContent(newContent);
+      onChange?.(newContent);
+    } else {
+      handleCommand('insertText', variableText);
+    }
   };
 
   const toggleHtmlMode = () => {
+    isUpdatingRef.current = true;
+    
     if (isHtmlMode) {
       // Switching from HTML to visual
-      if (editorRef.current) {
-        editorRef.current.innerHTML = content;
-      }
+      setIsHtmlMode(false);
+      // Use setTimeout to ensure state is updated before DOM manipulation
+      setTimeout(() => {
+        if (editorRef.current) {
+          editorRef.current.innerHTML = content;
+          isUpdatingRef.current = false;
+        }
+      }, 0);
     } else {
       // Switching from visual to HTML
       if (editorRef.current) {
-        setContent(editorRef.current.innerHTML);
+        const currentContent = editorRef.current.innerHTML;
+        setContent(currentContent);
+        onChange?.(currentContent);
       }
+      setIsHtmlMode(true);
+      isUpdatingRef.current = false;
     }
-    setIsHtmlMode(!isHtmlMode);
   };
 
   const fontSizes = ['12px', '14px', '16px', '18px', '20px', '24px', '28px', '32px'];
   const fontFamilies = ['Arial', 'Georgia', 'Times New Roman', 'Helvetica', 'Verdana', 'Courier New'];
   const colors = ['#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#FFA500', '#800080', '#FFC0CB'];
 
+  // Sync external value changes only when not in editing mode
   useEffect(() => {
-    if (editorRef.current && !isHtmlMode) {
-      editorRef.current.innerHTML = value;
+    if (value !== content && !isUpdatingRef.current) {
+      setContent(value);
+      if (editorRef.current && !isHtmlMode) {
+        isUpdatingRef.current = true;
+        editorRef.current.innerHTML = value;
+        setTimeout(() => {
+          isUpdatingRef.current = false;
+        }, 0);
+      }
     }
-  }, [value, isHtmlMode]);
+  }, [value, content, isHtmlMode]);
 
   return (
     <Card className="w-full max-w-4xl mx-auto">
@@ -108,6 +158,7 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
               size="sm"
               onClick={() => handleCommand('bold')}
               className="hover:bg-blue-100"
+              disabled={isHtmlMode}
             >
               <Bold className="h-4 w-4" />
             </Button>
@@ -116,6 +167,7 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
               size="sm"
               onClick={() => handleCommand('italic')}
               className="hover:bg-blue-100"
+              disabled={isHtmlMode}
             >
               <Italic className="h-4 w-4" />
             </Button>
@@ -124,6 +176,7 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
               size="sm"
               onClick={() => handleCommand('underline')}
               className="hover:bg-blue-100"
+              disabled={isHtmlMode}
             >
               <Underline className="h-4 w-4" />
             </Button>
@@ -134,7 +187,7 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
           {/* Headings */}
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="ghost" size="sm" className="hover:bg-blue-100">
+              <Button variant="ghost" size="sm" className="hover:bg-blue-100" disabled={isHtmlMode}>
                 <Type className="h-4 w-4 mr-1" />
                 <ChevronDown className="h-3 w-3" />
               </Button>
@@ -161,7 +214,7 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
           {/* Font Size */}
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="ghost" size="sm" className="hover:bg-blue-100">
+              <Button variant="ghost" size="sm" className="hover:bg-blue-100" disabled={isHtmlMode}>
                 Size <ChevronDown className="h-3 w-3 ml-1" />
               </Button>
             </PopoverTrigger>
@@ -185,7 +238,7 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
           {/* Font Family */}
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="ghost" size="sm" className="hover:bg-blue-100">
+              <Button variant="ghost" size="sm" className="hover:bg-blue-100" disabled={isHtmlMode}>
                 Font <ChevronDown className="h-3 w-3 ml-1" />
               </Button>
             </PopoverTrigger>
@@ -210,7 +263,7 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
           {/* Colors */}
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="ghost" size="sm" className="hover:bg-blue-100">
+              <Button variant="ghost" size="sm" className="hover:bg-blue-100" disabled={isHtmlMode}>
                 <Palette className="h-4 w-4" />
               </Button>
             </PopoverTrigger>
@@ -237,6 +290,7 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
               size="sm"
               onClick={() => handleCommand('justifyLeft')}
               className="hover:bg-blue-100"
+              disabled={isHtmlMode}
             >
               <AlignLeft className="h-4 w-4" />
             </Button>
@@ -245,6 +299,7 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
               size="sm"
               onClick={() => handleCommand('justifyCenter')}
               className="hover:bg-blue-100"
+              disabled={isHtmlMode}
             >
               <AlignCenter className="h-4 w-4" />
             </Button>
@@ -253,6 +308,7 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
               size="sm"
               onClick={() => handleCommand('justifyRight')}
               className="hover:bg-blue-100"
+              disabled={isHtmlMode}
             >
               <AlignRight className="h-4 w-4" />
             </Button>
@@ -308,12 +364,12 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
             contentEditable
             className="w-full min-h-96 p-4 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             onInput={handleContentChange}
-            onPaste={handleContentChange}
+            onBlur={handleContentChange}
             style={{ minHeight: '384px' }}
             suppressContentEditableWarning
           >
             {!content && (
-              <div className="text-gray-400 pointer-events-none">
+              <div className="text-gray-400 pointer-events-none select-none">
                 {placeholder}
               </div>
             )}
