@@ -54,22 +54,16 @@ const WysiwygEditor: React.FC<WysiwygEditorProps> = ({
   };
 
   const handleCroppedImage = (croppedImageUrl: string) => {
+    // Use document.execCommand to insert the image properly
+    const imgHtml = `<img src="${croppedImageUrl}" style="max-width: 100%; height: auto; cursor: move;" draggable="true" />`;
+    
+    // Focus the editor and insert the image
     if (editorRef.current) {
-      const img = document.createElement('img');
-      img.src = croppedImageUrl;
-      img.style.maxWidth = '100%';
-      img.style.height = 'auto';
-      img.style.cursor = 'move';
-      img.draggable = true;
-      
-      // Add drag functionality
-      img.addEventListener('dragstart', (e) => {
-        e.dataTransfer?.setData('text/html', img.outerHTML);
-      });
-      
-      editorRef.current.appendChild(img);
+      editorRef.current.focus();
+      document.execCommand('insertHTML', false, imgHtml);
       handleContentChange();
     }
+    
     setShowImageCropper(false);
     setSelectedImage(null);
   };
